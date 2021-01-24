@@ -3,11 +3,15 @@ package com.krayong.upipayment
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
+import android.text.method.DigitsKeyListener
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.zxing.BarcodeFormat
 import com.google.zxing.integration.android.IntentIntegrator
 import com.google.zxing.integration.android.IntentResult
+import com.journeyapps.barcodescanner.BarcodeEncoder
 import kotlinx.android.synthetic.main.activity_main.*
 import java.text.DecimalFormat
 import java.util.*
@@ -15,14 +19,22 @@ import java.util.*
 class MainActivity : AppCompatActivity() {
     private var mVpa: String? = null
     private var mName: String? = null
+
     private var mMerchantCode: String? = null
     private var mOrganizationId: String? = null
+
     private var mNote: String? = null
+    private var mQRHasNote: Boolean = false
+
     private var mAmount: String? = null
+    private var mQRHasAmount: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        et_note.inputType = InputType.TYPE_NULL
+        et_amount.inputType = InputType.TYPE_NULL
 
         btn_scan.setOnClickListener {
             val integrator = IntentIntegrator(this)
@@ -45,14 +57,12 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
                 et_amount.text.isNullOrEmpty() -> {
-                    Toast.makeText(
-                        this,
-                        "Please enter an amount",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    til_amount.error = "Please enter an amount"
                 }
                 else -> {
-                    mAmount = et_amount.text.toString()
+                    if (!mQRHasAmount) {
+                        mAmount = et_amount.text.toString()
+                    }
 
                     val amountCheck = mAmount?.toDoubleOrNull()
                     if (amountCheck != null) {
@@ -61,11 +71,11 @@ class MainActivity : AppCompatActivity() {
 
                         initiatePayment()
                     } else {
-                        Toast.makeText(
-                            this,
-                            "Please enter a valid amount",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        til_amount.error = "Please enter a valid amount"
+
+                        et_amount.setText("")
+                        mQRHasAmount = false
+                        mAmount = null
                     }
                 }
             }
@@ -73,12 +83,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initiatePayment() {
-        mNote = when {
-            et_note.text.isNullOrEmpty() -> "Payment from LFYD"
-            else -> et_note.text.toString()
+
+        if (!mQRHasNote) {
+            mNote = when {
+                et_note.text.isNullOrEmpty() -> "Payment from LFYD"
+                else -> et_note.text.toString()
+            }
+            et_note.setText(mNote)
         }
 
-        val tid = (System.currentTimeMillis() / 1000).toString() + (mName?.split(" ")?.get(0) ?: mName)
+        val tid =
+            (System.currentTimeMillis() / 1000).toString() + (mName?.split(" ")?.get(0) ?: mName)
 
         mNote?.replace(" ", "%20")
         mName?.replace(" ", "%20")
@@ -115,8 +130,11 @@ class MainActivity : AppCompatActivity() {
         val result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
         if (result != null) {
             if (result.contents == null) {
-                Toast.makeText(this, "QR Code could not be scanned", Toast.LENGTH_LONG)
-                    .show()
+                Toast.makeText(
+                    this,
+                    "QR Code could not be scanned",
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
                 parseQrCode(result)
             }
@@ -145,6 +163,7 @@ class MainActivity : AppCompatActivity() {
                                     "Transaction Failed. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
+
                                 iv_qr_code.setImageResource(R.drawable.ic_baseline_error_outline_24)
                             }
                         }
@@ -155,17 +174,27 @@ class MainActivity : AppCompatActivity() {
                         et_amount.setText("")
                     }
                 }
+                else -> {
+                    super.onActivityResult(requestCode, resultCode, data)
+                }
             }
         } else {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }
 
-    private fun setNull()
-    {
+    private fun setNull() {
         mVpa = null
         mName = null
+
         mMerchantCode = null
+        mOrganizationId = null
+
+        mQRHasAmount = false
+        mAmount = null
+
+        mQRHasNote = false
+        mNote = null
 
         tv_merchant_details.text = ""
     }
@@ -190,16 +219,44 @@ class MainActivity : AppCompatActivity() {
         } else {
             tv_merchant_details.text = mName
 
-            if (result.barcodeImagePath != null) {
-                val imagePath = Uri.parse(result.barcodeImagePath)
-                iv_qr_code.setImageURI(imagePath)
+            if (mNote.isNullOrEmpty() || mNote.equals("null")) {
+                mQRHasNote = false
+                et_note.inputType = InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE
+            } else {
+                mQRHasNote = true
+                et_note.inputType = InputType.TYPE_NULL
+                et_note.setText(mNote)
             }
+
+            if (mAmount.isNullOrEmpty() || mAmount.equals("null")) {
+                mQRHasAmount = false
+                et_amount.inputType = InputType.TYPE_NUMBER_FLAG_DECIMAL
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    et_amount.keyListener = DigitsKeyListener.getInstance(Locale.ROOT, false, true)
+                }
+            } else {
+                mQRHasAmount = true
+                et_amount.inputType = InputType.TYPE_NULL
+                et_amount.setText(mAmount)
+            }
+
+            val bitmap = BarcodeEncoder().encodeBitmap(
+                result.contents,
+                BarcodeFormat.QR_CODE,
+                iv_qr_code.measuredWidth,
+                iv_qr_code.measuredHeight
+            )
+            iv_qr_code.setImageBitmap(bitmap)
         }
 
-        Log.d("QR Code", "VPA: $mVpa, NAME: $mName, MERCHANT CODE: $mMerchantCode, ORGANIZATION ID: $mOrganizationId, NOTE: $mNote, AMOUNT: $mAmount")
+        Log.d(
+            "QR Code",
+            "VPA: $mVpa, NAME: $mName, MERCHANT CODE: $mMerchantCode, ORGANIZATION ID: $mOrganizationId, NOTE: $mNote, AMOUNT: $mAmount"
+        )
 
         Log.d("QR Code", result.contents)
     }
+
 
     private fun getTransactionDetails(response: String): TransactionDetails {
         val params = response.split("&")

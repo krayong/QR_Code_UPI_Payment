@@ -6,4 +6,4 @@ data class TransactionDetails(
     val responseCode: String,
     val status: String,
     val approvalRefNo: String
-    )
+)
